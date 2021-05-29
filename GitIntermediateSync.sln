@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31313.79
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GitIntermediateSync", "GitIntermediateSync.csproj", "{177C4B58-1141-4B20-BB14-74E98BC937B8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug [Apply]|Any CPU = Debug [Apply]|Any CPU
+		Debug [Save]|Any CPU = Debug [Save]|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{177C4B58-1141-4B20-BB14-74E98BC937B8}.Debug [Apply]|Any CPU.ActiveCfg = Debug [Apply]|Any CPU
+		{177C4B58-1141-4B20-BB14-74E98BC937B8}.Debug [Apply]|Any CPU.Build.0 = Debug [Apply]|Any CPU
+		{177C4B58-1141-4B20-BB14-74E98BC937B8}.Debug [Save]|Any CPU.ActiveCfg = Debug [Save]|Any CPU
+		{177C4B58-1141-4B20-BB14-74E98BC937B8}.Debug [Save]|Any CPU.Build.0 = Debug [Save]|Any CPU
+		{177C4B58-1141-4B20-BB14-74E98BC937B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{177C4B58-1141-4B20-BB14-74E98BC937B8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {61B196A9-53D6-4853-8A8E-FF581DE15F85}
+	EndGlobalSection
+EndGlobal
