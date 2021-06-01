@@ -1,4 +1,6 @@
-﻿using System;
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -6,6 +8,7 @@ using System.Text;
 // TODO
 // - Single file patch
 // - Checkout commit and branch
+//      - Warn if commit is not pushed yet
 // - Simplify code
 
 namespace GitIntermediateSync
@@ -198,12 +201,12 @@ namespace GitIntermediateSync
             if (success)
             {
                 Console.Out.WriteLine("Create unstaged patch...");
-                success &= AddToPatch(repositoryPath, repositoryPath, t1, false);
+                success &= AddToPatch(repositoryPath, t1, false);
             }
             if (success)
             {
                 Console.Out.WriteLine("Create staged patch...");
-                success &= AddToPatch(repositoryPath, repositoryPath, t2, true);
+                success &= AddToPatch(repositoryPath, t2, true);
             }
 
             if (!success)
@@ -224,24 +227,24 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool AddToPatch(in string repoPath, in string rootRepoPath, in string patchFile, in bool staged)
+        static bool AddToPatch(in string repoRootPath, in string patchFile, in bool staged)
         {
-            using (var repo = new LibGit2Sharp.Repository(repoPath))
+            foreach (var it in new RepositoryIterator(repoRootPath))
             {
-                Console.Out.Write("\t" + repoPath);
+                Console.Out.Write("\t" + it.Repository.Info.WorkingDirectory);
 
                 LibGit2Sharp.StatusOptions options = new LibGit2Sharp.StatusOptions();
-                LibGit2Sharp.RepositoryStatus status = repo.RetrieveStatus(options);
+                LibGit2Sharp.RepositoryStatus status = it.Repository.RetrieveStatus(options);
 
                 if (!status.IsDirty) // TODO: Can it be dirty while having changes in submodules?
                 {
                     Console.Out.WriteLine(" [No changes detected]");
-                    return true;
+                    continue;
                 }
 
                 Console.Out.WriteLine(" [Added]");
 
-                string relativePatchPath = Helper.GetRelativePath(rootRepoPath, repoPath).Replace('\\', '/');
+                string relativePatchPath = it.RelativePath.Replace('\\', '/');
                 string diffCommand = "diff --binary --no-color --src-prefix=a/" + relativePatchPath + " --dst-prefix=b/" + relativePatchPath;
                 if (staged)
                 {
@@ -249,7 +252,7 @@ namespace GitIntermediateSync
                 }
 
                 string diffContent;
-                if (SimpleGitCommand(repoPath, diffCommand, out diffContent) != 0)
+                if (SimpleGitCommand(it.Repository.Info.WorkingDirectory, diffCommand, out diffContent) != 0)
                 {
                     Console.Error.WriteLine("\t\tDiff failed!\n");
                     Console.Error.WriteLine(diffContent);
@@ -263,21 +266,6 @@ namespace GitIntermediateSync
                         patchWriter.NewLine = "\n";
 
                         patchWriter.Write(diffContent);
-                    }
-                }
-
-                foreach (var sub in repo.Submodules)
-                {
-                    string subPath = Path.Combine(repoPath, sub.Path);
-                    if (!LibGit2Sharp.Repository.IsValid(subPath))
-                    {
-                        Console.Error.WriteLine("\t\tSubmodule not valid " + subPath);
-                        continue;
-                    }
-
-                    if (!AddToPatch(subPath, rootRepoPath, patchFile, staged))
-                    {
-                        return false;
                     }
                 }
             }
@@ -355,37 +343,6 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool StashRecursive(string repoPath)
-        {
-            using (var repo = new LibGit2Sharp.Repository(repoPath))
-            {
-                var signature = new LibGit2Sharp.Signature("GitIntermediateSync", "invalid", DateTimeOffset.UtcNow);
-                var stash = repo.Stashes.Add(signature, "Backup", LibGit2Sharp.StashModifiers.IncludeUntracked);
-                if (stash != null)
-                {
-                    Console.Out.WriteLine("\t" + repoPath);
-                }
-                // TODO: Handle stashing exception error (if there are any)
-
-                foreach (var sub in repo.Submodules)
-                {
-                    string subPath = Path.Combine(repoPath, sub.Path);
-                    if (!LibGit2Sharp.Repository.IsValid(subPath))
-                    {
-                        Console.Error.WriteLine("\tSubmodule not valid " + subPath);
-                        continue;
-                    }
-                    
-                    if (!StashRecursive(subPath))
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        }
-
         static bool ApplyPatch(string repoPath, string patchFile, bool stage)
         {
             Console.Out.WriteLine("Applying patch " + patchFile);
@@ -413,30 +370,34 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool StageRecursive(string repoPath)
+        static bool StashRecursive(string repoRootPath)
         {
-            using (var repo = new LibGit2Sharp.Repository(repoPath))
+            foreach (var it in new RepositoryIterator(repoRootPath))
+            {
+                var signature = new LibGit2Sharp.Signature("GitIntermediateSync", "invalid", DateTimeOffset.UtcNow);
+                var stash = it.Repository.Stashes.Add(signature, "Backup", LibGit2Sharp.StashModifiers.IncludeUntracked);
+                if (stash != null)
+                {
+                    Console.Out.WriteLine("\t" + repoRootPath);
+                }
+                // TODO: Handle stashing exception error (if there are any)
+            }
+
+            return true;
+        }
+
+        static bool StageRecursive(string repoRootPath)
+        {
+            foreach (var it in new RepositoryIterator(repoRootPath))
             {
                 string outputStage;
-                if (SimpleGitCommand(repoPath, "add --all", out outputStage) != 0)
+                if (SimpleGitCommand(it.Repository.Info.WorkingDirectory, "add --all", out outputStage) != 0)
                 {
                     Console.Error.WriteLine("\nFailed to stage patch!");
                     Console.Error.WriteLine(outputStage);
                     return false;
                 }
-
                 // TODO: Handle stashing exception error (if there are any)
-
-                foreach (var sub in repo.Submodules)
-                {
-                    string subPath = Path.Combine(repoPath, sub.Path);
-                    if (!LibGit2Sharp.Repository.IsValid(subPath))
-                    {
-                        continue;
-                    }
-
-                    StageRecursive(subPath);
-                }
             }
 
             return true;
@@ -474,7 +435,12 @@ namespace GitIntermediateSync
         {
             repoName = string.Empty;
 
-            var remoteOriginUrl = repo.Config.Get<string>("remote.origin.url");
+            var remoteOriginUrl = repo.Config.Get<string>("remote.origin.url"); // TODO: Handle non-default origin names
+            if (remoteOriginUrl == null)
+            {
+                return false;
+            }
+
             string origin = remoteOriginUrl.Value;
             
             string gitUrlEnding = ".git";
@@ -493,6 +459,69 @@ namespace GitIntermediateSync
 
             repoName = origin;
             return true;
+        }
+
+        public class RepositoryIterator : IEnumerable<RepositoryIterator.Result>
+        {
+            public class Result
+            {
+                public Result(LibGit2Sharp.Repository repository, string relativePath)
+                {
+                    this.Repository = repository;
+                    this.RelativePath = relativePath;
+                }
+
+                public readonly LibGit2Sharp.Repository Repository;
+                public readonly string RelativePath;
+            }
+
+            private string RootRepoPath;
+            private string CurrentRepoPath;
+
+            public RepositoryIterator(string repoPath)
+            {
+                this.RootRepoPath = repoPath;
+                this.CurrentRepoPath = repoPath;
+            }
+
+            private RepositoryIterator(string repoPath, string repoRelativePath)
+            {
+                this.RootRepoPath = repoPath;
+                this.CurrentRepoPath = repoRelativePath;
+            }
+
+            public IEnumerator<Result> GetEnumerator()
+            {
+                using (var repo = new LibGit2Sharp.Repository(this.CurrentRepoPath))
+                {
+                    Result info = new Result(
+                        repo,
+                        Helper.GetRelativePath(RootRepoPath, CurrentRepoPath)
+                    );
+
+                    yield return info;
+
+                    foreach (var submodule in repo.Submodules)
+                    {
+                        string subPath = Path.Combine(CurrentRepoPath, submodule.Path);
+                        if (!LibGit2Sharp.Repository.IsValid(subPath))
+                        {
+                            Console.Error.WriteLine("Submodule not valid " + subPath);
+                            continue;
+                        }
+
+                        foreach (Result subInfo in new RepositoryIterator(RootRepoPath, subPath))
+                        {
+                            yield return subInfo;
+                        }
+                    }
+                }
+            }
+
+            IEnumerator IEnumerable.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
         }
     }
 }
