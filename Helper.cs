@@ -95,5 +95,19 @@ namespace GitIntermediateSync
 
             return formatted;
         }
+
+        public static bool ShowConfirmationMessage(string message)
+        {
+#if true
+            System.Windows.Forms.DialogResult result = System.Windows.Forms.MessageBox.Show(message, "Warning", System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Warning);
+            return result == System.Windows.Forms.DialogResult.Yes;
+#else
+            // Console.Out.WriteLine(Console.IsInputRedirected);
+            Console.Out.WriteLine(message);
+            Console.Out.Write("Confirm with (y)es or (n)o: ");
+            string result = Console.In.ReadLine();
+            return result == "y" || result == "Y";
+#endif
+        }
     }
 }

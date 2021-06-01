@@ -1,8 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+
+// TODO
+// - Single file patch
+// - Checkout commit and branch
+// - Simplify code
 
 namespace GitIntermediateSync
 {
@@ -11,76 +15,41 @@ namespace GitIntermediateSync
         static readonly string SYNC_SUB_PATH = Path.Combine("!sync", "Git");
         const string GIT_INSTALLER_MASK = "Git-*.exe";
 
-        const string PATCH_NAME_FORMAT = "{0}.{1}.{2}.patch"; //TODO: Use this
-
-        //TODO: Add to and from string function
-        enum SyncOperation
-        {
-            Save,
-            Apply
-        }
+        static readonly Encoding PATCH_ENCODER = new UTF8Encoding(false);
+        const string PATCH_NAME_FORMAT = "{0}.{1}.{2}.patch"; // TODO: Use this 0 = repo name, 1 = timestamp, 2 = staged/unstaged
 
         static int Main(string[] args)
         {
-            if (!Helper.CheckGit())
+            Console.OutputEncoding = PATCH_ENCODER; // necessary to output the patch with the correct encoding
+
+            bool success = Run(args);
+#if DEBUG
+            Console.In.ReadLine();
+#endif
+            return success ? 0 : -1;
+        }
+
+        static bool Run(string[] args)
+        {
+            if (!CheckPrerequisites())
             {
-                Console.Error.WriteLine("Git is not available!");
-
-                string[] gitInstallationFiles = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, GIT_INSTALLER_MASK, SearchOption.TopDirectoryOnly);
-                if (gitInstallationFiles.Length == 0)
-                {
-                    Console.Error.WriteLine("Unable to find a git installation executable!");
-                    return -1;
-                }
-                else if (gitInstallationFiles.Length == 1)
-                {
-                    string gitInstallExe = gitInstallationFiles[0];
-                    Console.Error.WriteLine("Running " + gitInstallExe);
-
-                    using (Process p = Process.Start(gitInstallExe))
-                    {
-                        p.WaitForExit();
-                        if (p.ExitCode != 0)
-                        {
-                            Console.Error.WriteLine("Installation failed!");
-                            return -1;
-                        }
-                    }
-
-                    if (!Helper.CheckGit())
-                    {
-                        Console.Error.WriteLine("Git is still not available! Please try to restart your application or computer.");
-                        return -1;
-                    }
-                }
-                else
-                {
-                    Console.Error.WriteLine("There are multiple git installation executables. Unable to install!");
-                    return -1;
-                }
+                return false;
             }
 
             if (args.Length < 1)
             {
-                Console.Error.WriteLine("Requires command <save> or <apply>");
-                return -1;
+                Console.Error.WriteLine("No operation provided!");
+                OperationCommands.PrintAllCommands();
+                return false;
             }
 
-            SyncOperation syncOperation;
+            Operation operation;
+            OperationInfo operationInfo;
+            if (!OperationCommands.TryGetOperation(args[0], out operation, out operationInfo))
             {
-                if (args[0] == "save")
-                {
-                    syncOperation = SyncOperation.Save;
-                }
-                else if (args[0] == "apply")
-                {
-                    syncOperation = SyncOperation.Apply;
-                }
-                else
-                {
-                    Console.Error.WriteLine("Unknown sync operation");
-                    return -1;
-                }
+                Console.Error.WriteLine("Unknown operation");
+                OperationCommands.PrintAllCommands();
+                return false;
             }
 
             string syncPath;
@@ -90,7 +59,7 @@ namespace GitIntermediateSync
                 if (!Directory.Exists(syncPath))
                 {
                     Console.Error.WriteLine("Sync directory not found! " + syncPath);
-                    return -1;
+                    return false;
                 }
             }
 
@@ -108,41 +77,91 @@ namespace GitIntermediateSync
                 if (!Directory.Exists(repoPath))
                 {
                     Console.Error.WriteLine("Repository directory not found!");
-                    return -1;
+                    return false;
                 }
 
                 if (!LibGit2Sharp.Repository.IsValid(repoPath))
                 {
                     Console.Error.WriteLine("Repository not valid!");
-                    return -1;
+                    return false;
+                }
+            }
+
+            if (operationInfo.critical)
+            {
+                if (!Helper.ShowConfirmationMessage(string.Format("<{0}> is a critical operation. Do you want to continue?", operationInfo.command)))
+                {
+                    Console.Error.WriteLine("OPERATION ABORTED");
+                    return false;
                 }
             }
 
             bool operationSuccess = false;
-            switch (syncOperation)
+            switch (operation)
             {
-                case SyncOperation.Save:
+                case Operation.Save:
                     operationSuccess = Op_MakePatch(repoPath, syncPath);
                     break;
-                case SyncOperation.Apply:
+                case Operation.Apply:
                     operationSuccess = Op_ApplyPatch(repoPath, syncPath);
                     break;
             }
 
             if (operationSuccess)
             {
-                Console.Out.WriteLine("\n--- DONE ---");
+                Console.Out.WriteLine("OPERATION COMPLETED");
+                return false;
             }
             else
             {
-                Console.Out.WriteLine("\n--- FAILURE ---");
+                Console.Out.WriteLine("OPERATION FAILED");
+                return false;
+            }
+        }
+
+        static bool CheckPrerequisites()
+        {
+            if (Helper.CheckGit())
+            {
+                return true;
             }
 
-#if DEBUG
-            Console.In.ReadLine();
-#endif
+            Console.Error.WriteLine("Git is not available!");
 
-            return operationSuccess ? 0 : -1;
+            string[] gitInstallationFiles = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, GIT_INSTALLER_MASK, SearchOption.TopDirectoryOnly);
+            if (gitInstallationFiles.Length == 0)
+            {
+                Console.Error.WriteLine("Unable to find a git installation executable!");
+                return false;
+            }
+            else if (gitInstallationFiles.Length == 1)
+            {
+                string gitInstallExe = gitInstallationFiles[0];
+                Console.Error.WriteLine("Running " + gitInstallExe);
+
+                using (Process p = Process.Start(gitInstallExe))
+                {
+                    p.WaitForExit();
+                    if (p.ExitCode != 0)
+                    {
+                        Console.Error.WriteLine("Installation failed!");
+                        return false;
+                    }
+                }
+
+                if (!Helper.CheckGit())
+                {
+                    Console.Error.WriteLine("Git is still not available! Please try to restart your application or computer.");
+                    return false;
+                }
+            }
+            else
+            {
+                Console.Error.WriteLine("There are multiple git installation executables. Unable to install!");
+                return false;
+            }
+
+            return true;
         }
 
         static bool Op_MakePatch(in string repositoryPath, in string syncPath)
@@ -175,6 +194,7 @@ namespace GitIntermediateSync
 
             bool success = true;
 
+            // TODO: Use stream as input instead of filename
             if (success)
             {
                 Console.Out.WriteLine("Create unstaged patch...");
@@ -238,7 +258,7 @@ namespace GitIntermediateSync
 
                 using (FileStream patchFileStream = new FileStream(patchFile, FileMode.Append))
                 {
-                    using (StreamWriter patchWriter = new StreamWriter(patchFileStream, new UTF8Encoding(false)))
+                    using (StreamWriter patchWriter = new StreamWriter(patchFileStream, PATCH_ENCODER))
                     {
                         patchWriter.NewLine = "\n";
 
@@ -355,7 +375,7 @@ namespace GitIntermediateSync
                         Console.Error.WriteLine("\tSubmodule not valid " + subPath);
                         continue;
                     }
-
+                    
                     if (!StashRecursive(subPath))
                     {
                         return false;
@@ -430,8 +450,9 @@ namespace GitIntermediateSync
             startInfo.WorkingDirectory = workingDir;
             startInfo.RedirectStandardOutput = true;
             startInfo.UseShellExecute = false;
-            startInfo.CreateNoWindow = true;
-            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+
+            startInfo.CreateNoWindow = false;
+            startInfo.WindowStyle = ProcessWindowStyle.Minimized;
 
             using (Process p = Process.Start(startInfo))
             {
@@ -455,14 +476,12 @@ namespace GitIntermediateSync
 
             var remoteOriginUrl = repo.Config.Get<string>("remote.origin.url");
             string origin = remoteOriginUrl.Value;
-
-            string repoUrlEnding = ".git";
-            if (!origin.EndsWith(repoUrlEnding))
+            
+            string gitUrlEnding = ".git";
+            if (origin.EndsWith(gitUrlEnding))
             {
-                return false;
+                origin = origin.Remove(origin.Length - gitUrlEnding.Length, gitUrlEnding.Length);
             }
-
-            origin = origin.Remove(origin.Length - repoUrlEnding.Length, repoUrlEnding.Length);
 
             int baseLength = origin.LastIndexOf('/');
             if (baseLength == -1)
