@@ -238,9 +238,9 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Commands.cs" />
-    <Compile Include="Helper.cs" />
-    <Compile Include="Program.cs" />
+    <Compile Include="Source\Commands.cs" />
+    <Compile Include="Source\Helper.cs" />
+    <Compile Include="Source\Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
