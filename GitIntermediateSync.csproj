@@ -239,6 +239,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Source\Commands.cs" />
+    <Compile Include="Source\GitHelper.cs" />
     <Compile Include="Source\Helper.cs" />
     <Compile Include="Source\Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -263,7 +264,9 @@
     <Content Include="FodyWeavers.xml" />
     <Content Include="git.ico" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Folder Include="Source\Commands\" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
     <PostBuildEvent>if "$(ConfigurationName)" == "Release" (

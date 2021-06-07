@@ -7,18 +7,20 @@ using System.Text;
 
 // TODO
 // - Single file patch
-// - Checkout commit and branch
-//      - Warn if commit is not pushed yet
 // - Simplify code
 // - Cleanup
 
 namespace GitIntermediateSync
 {
+    public abstract class Defines
+    {
+        public const string REMOTE_DEFAULT_NAME = "origin";
+    }
+
     class Program
     {
         static readonly string SYNC_SUB_PATH = Path.Combine("!sync", "Git");
         const string GIT_INSTALLER_MASK = "Git-*.exe";
-        const string REMOTE_DEFAULT_NAME = "origin";
 
         static readonly LibGit2Sharp.Signature SIGNATURE = new LibGit2Sharp.Signature("GitIntermediateSync", "(no email)", DateTimeOffset.UtcNow); // TODO: Replace by getter
 
@@ -28,7 +30,7 @@ namespace GitIntermediateSync
 
         static int Main(string[] args)
         {
-            // TODO: Only needs to apply to proccess start info?
+            // TODO: Only needs to apply to process start info?
             Console.OutputEncoding = PATCH_ENCODER; // necessary to output the patch with the correct encoding
 
             bool success = Run(args);
@@ -52,9 +54,7 @@ namespace GitIntermediateSync
                 return false;
             }
 
-            Operation operation;
-            OperationInfo operationInfo;
-            if (!OperationCommands.TryGetOperation(args[0], out operation, out operationInfo))
+            if (!OperationCommands.TryGetOperation(args[0], out OperationInfo operationInfo))
             {
                 Console.Error.WriteLine("Unknown operation");
                 OperationCommands.PrintAllCommands();
@@ -72,24 +72,24 @@ namespace GitIntermediateSync
                 }
             }
 
-            string repoPath;
+            string repositoryPath;
             {
                 if (args.Length > 1)
                 {
-                    repoPath = args[1];
+                    repositoryPath = args[1];
                 }
                 else
                 {
-                    repoPath = Directory.GetCurrentDirectory();
+                    repositoryPath = Directory.GetCurrentDirectory();
                 }
 
-                if (!Directory.Exists(repoPath))
+                if (!Directory.Exists(repositoryPath))
                 {
                     Console.Error.WriteLine("Repository directory not found!");
                     return false;
                 }
 
-                if (!LibGit2Sharp.Repository.IsValid(repoPath))
+                if (!LibGit2Sharp.Repository.IsValid(repositoryPath))
                 {
                     Console.Error.WriteLine("Repository not valid!");
                     return false;
@@ -106,13 +106,13 @@ namespace GitIntermediateSync
             }
 
             bool operationSuccess = false;
-            switch (operation)
+            switch (operationInfo.operation)
             {
                 case Operation.Save:
-                    operationSuccess = Op_MakePatch(repoPath, syncPath);
+                    operationSuccess = Op_MakePatch(repositoryPath, syncPath);
                     break;
                 case Operation.Apply:
-                    operationSuccess = Op_ApplyPatch(repoPath, syncPath);
+                    operationSuccess = Op_ApplyPatch(repositoryPath, syncPath);
                     break;
             }
 
@@ -131,7 +131,7 @@ namespace GitIntermediateSync
 
         static bool CheckPrerequisites()
         {
-            if (Helper.CheckGit())
+            if (GitHelper.CheckGitAvailability())
             {
                 return true;
             }
@@ -159,7 +159,7 @@ namespace GitIntermediateSync
                     }
                 }
 
-                if (!Helper.CheckGit())
+                if (!GitHelper.CheckGitAvailability())
                 {
                     Console.Error.WriteLine("Git is still not available! Please try to restart your application or computer.");
                     return false;
@@ -176,22 +176,22 @@ namespace GitIntermediateSync
 
         static bool Op_MakePatch(in string repositoryPath, in string syncPath)
         {
-            // TODO: Update status
+            // TODO: Update status?
+            // TODO: Check for idle repo
 
-            string repoName;
-            if (!GetGitRepoIdentifierName(repositoryPath, out repoName))
+            if (!GitHelper.GetRepositoryIdentifierName(repositoryPath, out string repoName))
             {
                 Console.Error.WriteLine("\tUnable to retrieve origin name!");
                 return false;
             }
 
-            // TODO: Check for idle repo
-
-            string addOutput;
-            if (SimpleGitCommand(repositoryPath, "add -AN", out addOutput) != 0)
+            foreach (var it in new RepositoryIterator(repositoryPath))
             {
-                Console.Error.WriteLine(addOutput);
-                return false;
+                if (GitHelper.Command(it.Repository.Info.WorkingDirectory, "add -AN", out string output) != 0)
+                {
+                    Console.Error.WriteLine(output);
+                    return false;
+                }
             }
 
             string timestamp = DateTime.Now.ToFileTimeUtc().ToString();
@@ -279,8 +279,7 @@ namespace GitIntermediateSync
                         diffCommand += " --staged";
                     }
 
-                    string diffContent;
-                    if (SimpleGitCommand(it.Repository.Info.WorkingDirectory, diffCommand, out diffContent) != 0)
+                    if (GitHelper.Command(it.Repository.Info.WorkingDirectory, diffCommand, out string diffContent) != 0)
                     {
                         Console.Error.WriteLine("{0,-15} [Failed]", it.Chain);
                         Console.Error.WriteLine(diffContent);
@@ -305,10 +304,9 @@ namespace GitIntermediateSync
 
         static bool Op_ApplyPatch(in string repoPath, in string syncPath)
         {
-            // TODO: Update status
+            // TODO: Update status?
 
-            string repoName;
-            if (!GetGitRepoIdentifierName(repoPath, out repoName))
+            if (!GitHelper.GetRepositoryIdentifierName(repoPath, out string repoName))
             {
                 Console.Error.WriteLine("Unable to retrieve origin name!", repoPath);
                 return false;
@@ -328,8 +326,7 @@ namespace GitIntermediateSync
                     string patchName = Path.GetFileName(file);
                     string timestamp = patchName.Replace(".info.patch", "").Replace(repoName + ".", "");
 
-                    long fileTime;
-                    if (!long.TryParse(timestamp, out fileTime))
+                    if (!long.TryParse(timestamp, out long fileTime))
                     {
                         continue;
                     }
@@ -365,7 +362,7 @@ namespace GitIntermediateSync
 
             // Apply latest patch
 
-            if (!StashRecursive(repoPath))
+            if (!Stash(new LibGit2Sharp.Repository(repoPath), true))
             {
                 return false;
             }
@@ -388,7 +385,7 @@ namespace GitIntermediateSync
             return true;
         }
 
-        private static bool WritePatchInfo(in string repositoryPath, in string infoFile)
+        static bool WritePatchInfo(in string repositoryPath, in string infoFile)
         {
             using (FileStream infoFileStream = new FileStream(infoFile, FileMode.Append))
             using (StreamWriter infoWriter = new StreamWriter(infoFileStream, PATCH_ENCODER))
@@ -485,16 +482,16 @@ namespace GitIntermediateSync
             {
                 // INFO: We expect the repository to have a remote that is called origin
 
-                var originRemote = it.Repository.Network.Remotes[REMOTE_DEFAULT_NAME];
-                if (originRemote == null)
+                var remote = GitHelper.GetRepositoryRemote(it.Repository);
+                if (remote == null)
                 {
-                    Console.Error.WriteLine("Could not find default remote origin ({0})", it.Repository.Info.WorkingDirectory);
+                    Console.Error.WriteLine("Could not find remote ({0})", it.Repository.Info.WorkingDirectory);
                     return false;
                 }
 
                 List<string> fetchRefSpecs = new List<string>();
                 string remoteRefDestinationBase = string.Empty;
-                foreach (var refSpec in originRemote.FetchRefSpecs)
+                foreach (var refSpec in remote.FetchRefSpecs)
                 {
                     fetchRefSpecs.Add(refSpec.Specification);
                     remoteRefDestinationBase = refSpec.Destination;
@@ -502,31 +499,30 @@ namespace GitIntermediateSync
 
                 if (fetchRefSpecs.Count != 1)
                 {
-                    Console.Error.WriteLine("Unexpected fetch ref specs ({0})", originRemote.Name);
+                    Console.Error.WriteLine("Unexpected fetch ref specs ({0})", remote.Name);
                     return false;
                 }
-                
-                it.Repository.Network.Fetch(originRemote.Name, fetchRefSpecs);
+
+                it.Repository.Network.Fetch(remote.Name, fetchRefSpecs);
 
                 if (d.TryGetValue(it.Chain, out string[] infos))
                 {
-                    var options = new LibGit2Sharp.CheckoutOptions();
-                    options.CheckoutModifiers = LibGit2Sharp.CheckoutModifiers.Force;
-
-                    const string formatCheckout = "{0,-15} -> {1}";
+                    var checkoutOptions = new LibGit2Sharp.CheckoutOptions();
+                    checkoutOptions.CheckoutModifiers = LibGit2Sharp.CheckoutModifiers.Force;
 
                     if (infos.Length == 1) // Checkout detached HEAD
                     {
                         var commit = it.Repository.Lookup(infos[0], LibGit2Sharp.ObjectType.Commit) as LibGit2Sharp.Commit;
                         if (commit != null)
                         {
-                            LibGit2Sharp.Commands.Checkout(it.Repository, commit, options);
-                            Console.Out.WriteLine(formatCheckout, it.Chain, commit.Sha);
+                            LibGit2Sharp.Commands.Checkout(it.Repository, commit, checkoutOptions);
+                            Console.Out.WriteLine("{0,-15} -> {1}", it.Chain, commit.Sha);
                             continue;
                         }
                     }
                     else if (infos.Length == 2) // Checkout branch
                     {
+                        // Get remote branch from name
                         // TODO: Handle branch with different local name
 
                         string remoteBranchName = infos[1];
@@ -538,6 +534,8 @@ namespace GitIntermediateSync
                             return false;
                         }
 
+                        // Get local branch from remote branch
+
                         LibGit2Sharp.Branch localBranch = null;
                         foreach (var branch in it.Repository.Branches)
                         {
@@ -547,6 +545,8 @@ namespace GitIntermediateSync
                                 break;
                             }
                         }
+
+                        // Create new branch if no local branch is tracking remote branch
 
                         if (localBranch == null)
                         {
@@ -560,10 +560,10 @@ namespace GitIntermediateSync
                             return false;
                         }
 
-                        string checkoutState = string.Empty;
+                        // Checkout local branch
 
-                        localBranch = LibGit2Sharp.Commands.Checkout(it.Repository, localBranch, options);
-                        if (!PullCurrentBranch(it, out checkoutState))
+                        localBranch = LibGit2Sharp.Commands.Checkout(it.Repository, localBranch, checkoutOptions);
+                        if (!PullCurrentBranch(it, out string checkoutState))
                         {
                             return false;
                         }
@@ -573,16 +573,16 @@ namespace GitIntermediateSync
                             var commit = it.Repository.Lookup(infos[0], LibGit2Sharp.ObjectType.Commit) as LibGit2Sharp.Commit;
                             if (commit != null)
                             {
-                                LibGit2Sharp.Commands.Checkout(it.Repository, commit, options);
+                                LibGit2Sharp.Commands.Checkout(it.Repository, commit, checkoutOptions);
                                 checkoutState = "Detached";
                             }
                         }
 
-                        Console.Out.WriteLine(formatCheckout + " [{2}]", it.Chain, localBranch.CanonicalName, checkoutState);
+                        Console.Out.WriteLine("{0,-15} -> {1} [{2}]", it.Chain, localBranch.CanonicalName, checkoutState);
                         continue;
                     }
 
-                    Console.Error.WriteLine("Invalid values in info file ({0})", infoFile);
+                    Console.Error.WriteLine("Invalid values in info file ({0})", it.Chain);
                     return false;
                 }
             }
@@ -590,7 +590,7 @@ namespace GitIntermediateSync
             return true;
         }
 
-        private static bool PullCurrentBranch(in RepositoryIterator.Result repoIt, out string resultState)
+        static bool PullCurrentBranch(in RepositoryIterator.Result repoIt, out string resultState)
         {
             LibGit2Sharp.FetchOptions fetchOptions = new LibGit2Sharp.FetchOptions();
 
@@ -631,8 +631,7 @@ namespace GitIntermediateSync
                 return true;
             }
 
-            string outputApply;
-            if (SimpleGitCommand(repoPath, "apply " + patchFile, out outputApply) != 0)
+            if (GitHelper.Command(repoPath, "apply " + patchFile, out string outputApply) != 0)
             {
                 Console.Error.WriteLine("Failed to apply patch:");
                 Console.Error.WriteLine(outputApply);
@@ -641,180 +640,50 @@ namespace GitIntermediateSync
 
             if (stage)
             {
-                StageRecursive(repoPath);
+                Stage(new LibGit2Sharp.Repository(repoPath), true);
             }
 
             return true;
         }
 
-        static bool StashRecursive(string repoRootPath)
+        static bool Stash(in LibGit2Sharp.Repository repository, in bool recursive)
         {
             Console.Out.WriteLine("Stashing...");
 
-            foreach (var it in new RepositoryIterator(repoRootPath))
+            foreach (var it in new RepositoryIterator(repository))
             {
                 var stash = it.Repository.Stashes.Add(SIGNATURE, "Backup", LibGit2Sharp.StashModifiers.IncludeUntracked);
+                // TODO: Handle stashing exception error (if there are any)
 
                 Console.Out.WriteLine("{0,-15} [{1}]", it.Chain, stash != null ? "Stashed" : "Skipped");
-                // TODO: Handle stashing exception error (if there are any)
+
+                if (!recursive)
+                {
+                    return true;
+                }
             }
 
             return true;
         }
 
-        static bool StageRecursive(string repoRootPath)
+        static bool Stage(in LibGit2Sharp.Repository repository, in bool recursive)
         {
-            foreach (var it in new RepositoryIterator(repoRootPath))
+            foreach (var it in new RepositoryIterator(repository))
             {
-                string outputStage;
-                if (SimpleGitCommand(it.Repository.Info.WorkingDirectory, "add --all", out outputStage) != 0)
+                if (GitHelper.Command(it.Repository.Info.WorkingDirectory, "add --all", out string output) != 0)
                 {
                     Console.Error.WriteLine("Failed to stage patch ({0})", it.Chain);
-                    Console.Error.WriteLine(outputStage);
+                    Console.Error.WriteLine(output);
                     return false;
                 }
-                // TODO: Handle stashing exception error (if there are any)
-            }
 
-            return true;
-        }
-
-        static int SimpleGitCommand(in string workingDir, in string command, out string output)
-        {
-            ProcessStartInfo startInfo = new ProcessStartInfo();
-            startInfo.FileName = "git";
-            startInfo.Arguments = command;
-            startInfo.WorkingDirectory = workingDir;
-            startInfo.RedirectStandardOutput = true;
-            startInfo.UseShellExecute = false;
-
-            startInfo.CreateNoWindow = false;
-            startInfo.WindowStyle = ProcessWindowStyle.Minimized;
-
-            using (Process p = Process.Start(startInfo))
-            {
-                // TODO: Handle/Indent error output
-
-                output = p.StandardOutput.ReadToEnd();
-                p.WaitForExit();
-                return p.ExitCode;
-            }
-        }
-
-        static bool GetGitRepoIdentifierName(in string repoPath, out string repoName)
-        {
-            using (var repo = new LibGit2Sharp.Repository(repoPath))
-            {
-                return GetGitRepoIdentifierName(repo, out repoName);
-            }
-        }
-
-        static bool GetGitRepoIdentifierName(in LibGit2Sharp.Repository repo, out string repoName)
-        {
-            repoName = string.Empty;
-
-            // TODO: Handle non-default origin names
-            string remoteOriginUrlKey = string.Format("remote.{0}.url", REMOTE_DEFAULT_NAME);
-            var remoteOriginUrl = repo.Config.Get<string>(remoteOriginUrlKey);
-            if (remoteOriginUrl == null)
-            {
-                return false;
-            }
-
-            string origin = remoteOriginUrl.Value;
-            
-            string gitUrlEnding = ".git";
-            if (origin.EndsWith(gitUrlEnding))
-            {
-                origin = origin.Remove(origin.Length - gitUrlEnding.Length, gitUrlEnding.Length);
-            }
-
-            int baseLength = origin.LastIndexOf('/');
-            if (baseLength == -1)
-            {
-                return false;
-            }
-
-            origin = origin.Remove(0, baseLength + 1);
-
-            repoName = origin;
-            return true;
-        }
-
-        public class RepositoryIterator : IEnumerable<RepositoryIterator.Result>
-        {
-            public class Result
-            {
-                public Result(LibGit2Sharp.Repository repository, string relativePath, string chain)
+                if (!recursive)
                 {
-                    this.Repository = repository;
-                    this.RelativePath = relativePath;
-                    this.Chain = chain;
-                }
-
-                public readonly LibGit2Sharp.Repository Repository;
-                public readonly string RelativePath;
-                public readonly string Chain;
-            }
-
-            private string RootRepoPath;
-            private string CurrentRepoPath;
-            private string CurrentRepoChain;
-
-            public RepositoryIterator(string repoPath)
-            {
-                this.RootRepoPath = repoPath;
-                this.CurrentRepoPath = repoPath;
-                this.CurrentRepoChain = string.Empty;
-            }
-
-            private RepositoryIterator(string repoPath, string currentRepoPath, string currentRepoChain)
-            {
-                this.RootRepoPath = repoPath;
-                this.CurrentRepoPath = currentRepoPath;
-                this.CurrentRepoChain = currentRepoChain;
-            }
-
-            public IEnumerator<Result> GetEnumerator()
-            {
-                using (var repo = new LibGit2Sharp.Repository(this.CurrentRepoPath))
-                {
-                    if (!GetGitRepoIdentifierName(repo, out string repoName))
-                    {
-                        yield break;
-                    }
-
-                    CurrentRepoChain = Path.Combine(CurrentRepoChain, repoName);
-
-                    Result info = new Result(
-                        repo,
-                        Helper.GetRelativePath(RootRepoPath, CurrentRepoPath),
-                        CurrentRepoChain
-                    );
-
-                    yield return info;
-
-                    foreach (var submodule in repo.Submodules)
-                    {
-                        string subPath = Path.Combine(CurrentRepoPath, submodule.Path);
-                        if (!LibGit2Sharp.Repository.IsValid(subPath))
-                        {
-                            Console.Error.WriteLine("Submodule not valid " + subPath);
-                            continue;
-                        }
-
-                        foreach (Result subInfo in new RepositoryIterator(RootRepoPath, subPath, CurrentRepoChain))
-                        {
-                            yield return subInfo;
-                        }
-                    }
+                    return true;
                 }
             }
 
-            IEnumerator IEnumerable.GetEnumerator()
-            {
-                return GetEnumerator();
-            }
+            return true;
         }
     }
 }

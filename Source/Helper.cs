@@ -37,26 +37,6 @@ namespace GitIntermediateSync
             return relativePath;
         }
 
-        public static bool CheckGit()
-        {
-            try
-            {
-                ProcessStartInfo ps = new ProcessStartInfo("git", "--version");
-                ps.WindowStyle = ProcessWindowStyle.Hidden;
-
-                using (Process p = Process.Start(ps))
-                {
-                    p.WaitForExit();
-                    return p.ExitCode == 0;
-                }
-            }
-            catch (System.Exception ex)
-            {
-                //Console.Error.WriteLine(ex);
-                return false;
-            }
-        }
-
         private static string AppendDirectorySeparatorChar(string path)
         {
             // Append a slash only if the path is a directory and does not have a slash.
