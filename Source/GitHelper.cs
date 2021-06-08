@@ -6,14 +6,16 @@ using System.IO;
 
 namespace GitIntermediateSync
 {
-    public abstract class GitHelper
+    abstract class GitHelper
     {
         public static bool CheckGitAvailability()
         {
             try
             {
-                ProcessStartInfo ps = new ProcessStartInfo("git", "--version");
-                ps.WindowStyle = ProcessWindowStyle.Hidden;
+                ProcessStartInfo ps = new ProcessStartInfo("git", "--version")
+                {
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
 
                 using (Process p = Process.Start(ps))
                 {
@@ -71,23 +73,30 @@ namespace GitIntermediateSync
             return true;
         }
 
-        public static int Command(in string workingDir, in string command, out string output)
+        public static int Command(in string workingDir, in string command, out string error)
         {
-            ProcessStartInfo startInfo = new ProcessStartInfo();
-            startInfo.FileName = "git";
-            startInfo.Arguments = command;
-            startInfo.WorkingDirectory = workingDir;
-            startInfo.RedirectStandardOutput = true;
-            startInfo.UseShellExecute = false;
+            return Command(workingDir, command, out error, out _);
+        }
 
-            startInfo.CreateNoWindow = false;
-            startInfo.WindowStyle = ProcessWindowStyle.Minimized;
+        public static int Command(in string workingDir, in string command, out string error, out string output)
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = command,
+                WorkingDirectory = workingDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+
+                CreateNoWindow = false,
+                WindowStyle = ProcessWindowStyle.Minimized
+            };
 
             using (Process p = Process.Start(startInfo))
             {
-                // TODO: Handle/Indent error output
-
                 output = p.StandardOutput.ReadToEnd();
+                error = p.StandardError.ReadToEnd();
                 p.WaitForExit();
                 return p.ExitCode;
             }
@@ -95,7 +104,7 @@ namespace GitIntermediateSync
     }
     
     // TODO: Iterator is not implemented correctly
-    public class RepositoryIterator : IEnumerable<RepositoryIterator.Result>
+    class RepositoryIterator : IEnumerable<RepositoryIterator.Result>
     {
         public class Result
         {
@@ -112,7 +121,7 @@ namespace GitIntermediateSync
         }
 
         private readonly string RootRepoPath;
-        private string CurrentRepoPath;
+        private readonly string CurrentRepoPath;
         private string CurrentRepoChain;
 
         public RepositoryIterator(LibGit2Sharp.Repository repository)

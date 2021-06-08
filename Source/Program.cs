@@ -1,37 +1,34 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
 
 // TODO
-// - Single file patch
 // - Simplify code
-// - Cleanup
+// - Cleanup Backups and Patches
+// - Replace staged/unstaged with index/working/?
 
 namespace GitIntermediateSync
 {
-    public abstract class Defines
+    abstract class Defines
     {
         public const string REMOTE_DEFAULT_NAME = "origin";
+        public static readonly Encoding PATCH_ENCODER = new UTF8Encoding(false);
+        public const string PATCH_NEW_LINE = "\n";
     }
 
-    class Program
+    abstract class Program
     {
         static readonly string SYNC_SUB_PATH = Path.Combine("!sync", "Git");
         const string GIT_INSTALLER_MASK = "Git-*.exe";
 
         static readonly LibGit2Sharp.Signature SIGNATURE = new LibGit2Sharp.Signature("GitIntermediateSync", "(no email)", DateTimeOffset.UtcNow); // TODO: Replace by getter
 
-        static readonly Encoding PATCH_ENCODER = new UTF8Encoding(false);
-        static readonly string PATCH_NEW_LINE = "\n";
-        const string PATCH_NAME_FORMAT = "{0}.{1}.{2}.patch"; // TODO: Use this 0 = repo name, 1 = timestamp, 2 = staged/unstaged
-
         static int Main(string[] args)
         {
             // TODO: Only needs to apply to process start info?
-            Console.OutputEncoding = PATCH_ENCODER; // necessary to output the patch with the correct encoding
+            Console.OutputEncoding = Defines.PATCH_ENCODER; // necessary to output the patch with the correct encoding
 
             bool success = Run(args);
 #if DEBUG
@@ -174,311 +171,232 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool Op_MakePatch(in string repositoryPath, in string syncPath)
+        static bool CheckRepositoryReady(in LibGit2Sharp.Repository rootRepository)
         {
-            // TODO: Update status?
-            // TODO: Check for idle repo
-
-            if (!GitHelper.GetRepositoryIdentifierName(repositoryPath, out string repoName))
+            foreach (var it in new RepositoryIterator(rootRepository))
             {
-                Console.Error.WriteLine("\tUnable to retrieve origin name!");
-                return false;
-            }
-
-            foreach (var it in new RepositoryIterator(repositoryPath))
-            {
-                if (GitHelper.Command(it.Repository.Info.WorkingDirectory, "add -AN", out string output) != 0)
+                if (it.Repository.Info.CurrentOperation != LibGit2Sharp.CurrentOperation.None)
                 {
-                    Console.Error.WriteLine(output);
+                    Console.Error.WriteLine("Repository is currently in operation ({0})", it.Chain);
                     return false;
                 }
             }
 
-            string timestamp = DateTime.Now.ToFileTimeUtc().ToString();
+            return true;
+        }
 
-            string fileNameInfo = repoName + "." + timestamp + ".info.patch";
-            string fileNameUnstaged = repoName + "." + timestamp + ".unstaged.patch";
-            string fileNameStaged = repoName + "." + timestamp + ".staged.patch";
-
-            string patchFileInfo = Path.Combine(syncPath, fileNameInfo);
-            string patchFileUnstaged = Path.Combine(syncPath, fileNameUnstaged);
-            string patchFileStaged = Path.Combine(syncPath, fileNameStaged);
-
-            string tmpPath = Path.GetTempPath();
-
-            string fInfo = Path.Combine(tmpPath, fileNameInfo + ".tmp");
-            string fPatchUnstaged = Path.Combine(tmpPath, fileNameUnstaged + ".tmp");
-            string fPatchStaged = Path.Combine(tmpPath, fileNameStaged + ".tmp");
-
-            File.CreateText(fInfo).Dispose();
-            File.CreateText(fPatchUnstaged).Dispose();
-            File.CreateText(fPatchStaged).Dispose();
-
-            // Writing patch
+        static bool Op_MakePatch(in string rootRepositoryPath, in string syncPath)
+        {
+            using (var repository = new LibGit2Sharp.Repository(rootRepositoryPath))
             {
-                bool success = true;
-
-                if (success)
+                if (!CheckRepositoryReady(repository))
                 {
-                    success &= WritePatchInfo(repositoryPath, fInfo);
-                }
-                if (success)
-                {
-                    Console.Out.WriteLine("Create unstaged patch...");
-                    success &= WritePatchDiff(repositoryPath, fPatchUnstaged, false);
-                }
-                if (success)
-                {
-                    Console.Out.WriteLine("Create staged patch...");
-                    success &= WritePatchDiff(repositoryPath, fPatchStaged, true);
+                    return false;
                 }
 
-                if (!success)
+                foreach (var it in new RepositoryIterator(repository))
                 {
-                    File.Delete(fInfo);
-                    File.Delete(fPatchUnstaged);
-                    File.Delete(fPatchStaged);
+                    if (GitHelper.Command(it.Repository.Info.WorkingDirectory, "add -AN", out string error) != 0)
+                    {
+                        Console.Error.WriteLine(Helper.Indent(error));
+                        return false;
+                    }
+                }
+
+                Patch patch = Patch.New();
+
+                // Writing to patch
+                {
+                    bool success = true;
+
+                    if (success)
+                    {
+                        success &= WritePatchHeads(repository, patch);
+                    }
+                    if (success)
+                    {
+                        Console.Out.WriteLine("Create unstaged patch...");
+                        success &= WritePatchDiff(repository, patch, false);
+                    }
+                    if (success)
+                    {
+                        Console.Out.WriteLine("Create staged patch...");
+                        success &= WritePatchDiff(repository, patch, true);
+                    }
+
+                    if (!success)
+                    {
+                        return false;
+                    }
+                }
+
+                if (patch.Serialize(repository, syncPath, out string file))
+                {
+                    Console.Out.WriteLine("Created patch {0}", file);
+                    return true;
+                }
+                else
+                {
+                    Console.Error.WriteLine("Failed to create patch!");
                     return false;
                 }
             }
+        }
 
-            File.Move(fInfo, patchFileInfo);
-            File.Move(fPatchUnstaged, patchFileUnstaged);
-            File.Move(fPatchStaged, patchFileStaged);
+        static bool WritePatchDiff(in LibGit2Sharp.Repository rootRepository, in Patch patch, in bool staged)
+        {
+            foreach (var it in new RepositoryIterator(rootRepository))
+            {
+                LibGit2Sharp.StatusOptions options = new LibGit2Sharp.StatusOptions();
+                LibGit2Sharp.RepositoryStatus status = it.Repository.RetrieveStatus(options);
 
-            Console.Out.WriteLine("Created info  {0}", patchFileInfo);
-            Console.Out.WriteLine("Created patch {0}", patchFileUnstaged);
-            Console.Out.WriteLine("Created patch {0}", patchFileStaged);
+                if (!status.IsDirty)
+                {
+                    Console.Out.WriteLine("{0,-15} [No changes detected]", it.Chain);
+                    continue;
+                }
+
+                string relativePatchPath = it.RelativePath.Replace('\\', '/');
+                string diffCommand = string.Format("diff --binary --no-color --src-prefix=a/{0} --dst-prefix=b/{0}", relativePatchPath);
+                if (staged)
+                {
+                    diffCommand += " --staged";
+                }
+
+                if (GitHelper.Command(it.Repository.Info.WorkingDirectory, diffCommand, out string error, out string output) != 0)
+                {
+                    Console.Error.WriteLine("{0,-15} [Failed]", it.Chain);
+                    Console.Error.WriteLine(Helper.Indent(error));
+                    return false;
+                }
+
+                if (string.IsNullOrEmpty(output))
+                {
+                    Console.Out.WriteLine("{0,-15} [No changes detected]", it.Chain);
+                    continue;
+                }
+
+                if (staged)
+                {
+                    patch.DiffStaged = output;
+                }
+                else
+                {
+                    patch.DiffUnstaged = output;
+                }
+
+                Console.Out.WriteLine("{0,-15} [Added]", it.Chain);
+            }
+
             Console.Out.WriteLine();
 
             return true;
         }
 
-        static bool WritePatchDiff(in string repoRootPath, in string patchFile, in bool staged)
+        static bool Op_ApplyPatch(in string rootRepositoryPath, in string syncPath)
         {
-            using (FileStream patchFileStream = new FileStream(patchFile, FileMode.Append))
-            using (StreamWriter patchWriter = new StreamWriter(patchFileStream, PATCH_ENCODER))
+            using (var repository = new LibGit2Sharp.Repository(rootRepositoryPath))
             {
-                patchWriter.NewLine = PATCH_NEW_LINE;
-
-                foreach (var it in new RepositoryIterator(repoRootPath))
+                if (!CheckRepositoryReady(repository))
                 {
-                    LibGit2Sharp.StatusOptions options = new LibGit2Sharp.StatusOptions();
-                    LibGit2Sharp.RepositoryStatus status = it.Repository.RetrieveStatus(options);
+                    return false;
+                }
 
-                    if (!status.IsDirty)
-                    {
-                        Console.Out.WriteLine("{0,-15} [No changes detected]", it.Chain);
-                        continue;
-                    }
+                Patch patch = Patch.FromPath(repository, syncPath, out DateTime timestamp);
+                if (patch == null)
+                {
+                    Console.Error.WriteLine("Could not find patch in {0}", syncPath);
+                    return false;
+                }
 
-                    string relativePatchPath = it.RelativePath.Replace('\\', '/');
-                    string diffCommand = string.Format("diff --binary --no-color --src-prefix=a/{0} --dst-prefix=b/{0}", relativePatchPath);
-                    if (staged)
-                    {
-                        diffCommand += " --staged";
-                    }
+                TimeSpan patchAge = DateTime.Now - timestamp.ToLocalTime();
+                Console.Out.WriteLine("Latest patch is from {0} ago ({1})", Helper.ToReadableString(patchAge), timestamp.ToLocalTime().ToString());
+                Console.Out.WriteLine();
 
-                    if (GitHelper.Command(it.Repository.Info.WorkingDirectory, diffCommand, out string diffContent) != 0)
+                // Apply latest patch
+
+                if (!Stash(repository, true))
+                {
+                    return false;
+                }
+                Console.Out.WriteLine();
+
+                if (!ApplyPatchHeads(repository, patch.Heads))
+                {
+                    return false;
+                }
+                Console.Out.WriteLine();
+
+                if (!ApplyPatch(repository, patch.DiffStaged, true) ||
+                    !ApplyPatch(repository, patch.DiffUnstaged, false))
+                {
+                    return false;
+                }
+                Console.Out.WriteLine();
+
+                return true;
+            }
+        }
+
+        static bool WritePatchHeads(in LibGit2Sharp.Repository rootRepository, in Patch patch)
+        {
+            foreach (var it in new RepositoryIterator(rootRepository))
+            {
+                // TODO: Prevent patch if there are commits made in detached head state
+
+                if (it.Repository.Head.TrackingDetails.AheadBy != null && it.Repository.Head.TrackingDetails.AheadBy != 0)
+                {
+                    Console.Error.WriteLine("Cannot create patch if there are uncommited changes ({0})", it.Chain);
+                    return false;
+                }
+
+                Patch.HeadInfo headInfo = new Patch.HeadInfo();
+                headInfo.Sha = it.Repository.Head.Tip.Sha;
+
+                if (it.Repository.Info.IsHeadDetached)
+                {
+
+                }
+                else if (it.Repository.Head.IsTracking && it.Repository.Head.TrackedBranch.IsRemote)
+                {
+                    LibGit2Sharp.Branch remoteBranch = it.Repository.Head.TrackedBranch;
+
+                    string remoteBranchName = remoteBranch.CanonicalName;
+                    string prefixToRemove = "refs/remotes/" + remoteBranch.RemoteName + "/";
+                    if (!remoteBranchName.StartsWith(prefixToRemove))
                     {
-                        Console.Error.WriteLine("{0,-15} [Failed]", it.Chain);
-                        Console.Error.WriteLine(diffContent);
+                        Console.Error.WriteLine("Unexpected remote branch canonical name ({0}: {1})", it.Chain, remoteBranch.CanonicalName);
                         return false;
                     }
 
-                    if (string.IsNullOrEmpty(diffContent))
-                    {
-                        Console.Out.WriteLine("{0,-15} [No changes detected]", it.Chain);
-                        continue;
-                    }
-
-                    Console.Out.WriteLine("{0,-15} [Added]", it.Chain);
-                    patchWriter.Write(diffContent);
+                    headInfo.RemoteBranchName = remoteBranchName.Remove(0, prefixToRemove.Length);
+                    //remoteUrl = repo.Network.Remotes[remoteBranch.RemoteName].Url;
                 }
-            }
-
-            Console.Out.WriteLine();
-
-            return true;
-        }
-
-        static bool Op_ApplyPatch(in string repoPath, in string syncPath)
-        {
-            // TODO: Update status?
-
-            if (!GitHelper.GetRepositoryIdentifierName(repoPath, out string repoName))
-            {
-                Console.Error.WriteLine("Unable to retrieve origin name!", repoPath);
-                return false;
-            }
-
-            // TODO: Check for idle repo
-
-            string[] files = Directory.GetFiles(syncPath, repoName + ".*.info.patch");
-
-            string latestPatchFile = string.Empty;
-            DateTime latestPatchTime = DateTime.MinValue;
-
-            {
-                bool foundLatestPatch = false;
-                foreach (string file in files)
+                else
                 {
-                    string patchName = Path.GetFileName(file);
-                    string timestamp = patchName.Replace(".info.patch", "").Replace(repoName + ".", "");
-
-                    if (!long.TryParse(timestamp, out long fileTime))
+                    if (!it.Repository.Info.IsHeadDetached && !it.Repository.Head.IsTracking)
                     {
-                        continue;
-                    }
-
-                    DateTime time = DateTime.FromFileTimeUtc(fileTime);
-                    if (time > latestPatchTime)
-                    {
-                        foundLatestPatch = true;
-                        latestPatchTime = time;
-                        latestPatchFile = file;
-                    }
-                }
-
-                if (!foundLatestPatch)
-                {
-                    Console.Error.WriteLine("Could not find any patch for repository ({0})", repoName);
-                    return false;
-                }
-            }
-
-            string infoPatchFile = latestPatchFile;
-            string stagedPatchFile = latestPatchFile.Replace(".info.patch", ".staged.patch");
-            string unstagePatchFile = latestPatchFile.Replace(".info.patch", ".unstaged.patch");
-            if (!File.Exists(infoPatchFile) || !File.Exists(stagedPatchFile) || !File.Exists(unstagePatchFile))
-            {
-                Console.Error.WriteLine("Could not find all required patches for repository ({0})", repoName);
-                return false;
-            }
-
-            TimeSpan latestPatchTimeSpan = DateTime.Now - latestPatchTime.ToLocalTime();
-            Console.Out.WriteLine("Latest patch is from {0} ago ({1})", Helper.ToReadableString(latestPatchTimeSpan), latestPatchTime.ToLocalTime().ToString());
-            Console.Out.WriteLine();
-
-            // Apply latest patch
-
-            if (!Stash(new LibGit2Sharp.Repository(repoPath), true))
-            {
-                return false;
-            }
-            Console.Out.WriteLine();
-
-            if (!ApplyPatchHeads(repoPath, infoPatchFile))
-            {
-                return false;
-            }
-            Console.Out.WriteLine();
-
-            Console.Out.WriteLine("Applying patches...");
-            if (!ApplyPatch(repoPath, stagedPatchFile, true) ||
-                !ApplyPatch(repoPath, unstagePatchFile, false))
-            {
-                return false;
-            }
-            Console.Out.WriteLine();
-
-            return true;
-        }
-
-        static bool WritePatchInfo(in string repositoryPath, in string infoFile)
-        {
-            using (FileStream infoFileStream = new FileStream(infoFile, FileMode.Append))
-            using (StreamWriter infoWriter = new StreamWriter(infoFileStream, PATCH_ENCODER))
-            {
-                infoWriter.NewLine = PATCH_NEW_LINE;
-
-                foreach (var it in new RepositoryIterator(repositoryPath))
-                {
-                    var repo = it.Repository;
-
-                    // TODO: Prevent patch if there are commits made in detached head state
-
-                    if (repo.Head.TrackingDetails.AheadBy != null && repo.Head.TrackingDetails.AheadBy != 0)
-                    {
-                        Console.Error.WriteLine("Cannot create patch if there are uncommited changes ({0})", it.Chain);
-                        return false;
-                    }
-
-                    string headCommit = repo.Head.Tip.Sha;
-                    string branchName = string.Empty;
-
-                    if (repo.Info.IsHeadDetached)
-                    {
-                        
-                    }
-                    else if (repo.Head.IsTracking && repo.Head.TrackedBranch.IsRemote)
-                    {
-                        LibGit2Sharp.Branch remoteBranch = repo.Head.TrackedBranch;
-
-                        string remoteBranchName = remoteBranch.CanonicalName;
-                        string prefixToRemove = "refs/remotes/" + remoteBranch.RemoteName + "/";
-                        if (!remoteBranchName.StartsWith(prefixToRemove))
-                        {
-                            Console.Error.WriteLine("Unexpected remote branch canonical name ({0}: {1})", it.Chain, remoteBranch.CanonicalName);
-                            return false;
-                        }
-
-                        branchName = remoteBranchName.Remove(0, prefixToRemove.Length);
-                        //remoteUrl = repo.Network.Remotes[remoteBranch.RemoteName].Url;
+                        Console.Error.WriteLine("Cannot create patch for local branch ({0}: {1})", it.Chain, it.Repository.Head.CanonicalName);
                     }
                     else
                     {
-                        if (!repo.Info.IsHeadDetached && !repo.Head.IsTracking)
-                        {
-                            Console.Error.WriteLine("Cannot create patch for local branch ({0}: {1})", it.Chain, repo.Head.CanonicalName);
-                        }
-                        else
-                        {
-                            Console.Error.WriteLine("Unknown HEAD location ({0}: {1})", it.Chain, repo.Head.CanonicalName);
-                        }
-
-                        return false;
+                        Console.Error.WriteLine("Unknown HEAD location ({0}: {1})", it.Chain, it.Repository.Head.CanonicalName);
                     }
 
-                    string line = string.Format("{0} {1} {2}", it.Chain, headCommit, branchName).Trim();
-                    infoWriter.WriteLine(line);
-                };
-            }
+                    return false;
+                }
+
+                patch.Heads.Add(it.Chain, headInfo);
+            };
 
             return true;
         }
 
-        static bool ApplyPatchHeads(in string repoPath, in string infoFile)
+        static bool ApplyPatchHeads(in LibGit2Sharp.Repository rootRepository, in Dictionary<string, Patch.HeadInfo> heads)
         {
             Console.Out.WriteLine("Apply patch HEADs...");
 
-            Dictionary<string, string[]> d = new Dictionary<string, string[]>();
-
-            using (FileStream infoFileStream = new FileStream(infoFile, FileMode.Open))
-            using (StreamReader infoFileReader = new StreamReader(infoFileStream, PATCH_ENCODER))
-            {
-                while (!infoFileReader.EndOfStream)
-                {
-                    string line = infoFileReader.ReadLine().Trim();
-                    string[] pair = line.Split(new[] { ' ' }, 2);
-                    if (pair.Length < 2)
-                    {
-                        Console.Error.WriteLine("Unexpected line in info file ({0})", infoFile);
-                        return false;
-                    }
-
-                    string[] values = pair[1].Split(' ');
-                    if (values.Length < 1)
-                    {
-                        Console.Error.WriteLine("Unexpected values in info file ({0})", infoFile);
-                        return false;
-                    }
-
-                    d.Add(pair[0], values);
-                }
-            }
-
-            foreach (var it in new RepositoryIterator(repoPath))
+            foreach (var it in new RepositoryIterator(rootRepository))
             {
                 // INFO: We expect the repository to have a remote that is called origin
 
@@ -505,14 +423,16 @@ namespace GitIntermediateSync
 
                 it.Repository.Network.Fetch(remote.Name, fetchRefSpecs);
 
-                if (d.TryGetValue(it.Chain, out string[] infos))
+                if (heads.TryGetValue(it.Chain, out Patch.HeadInfo info))
                 {
-                    var checkoutOptions = new LibGit2Sharp.CheckoutOptions();
-                    checkoutOptions.CheckoutModifiers = LibGit2Sharp.CheckoutModifiers.Force;
-
-                    if (infos.Length == 1) // Checkout detached HEAD
+                    var checkoutOptions = new LibGit2Sharp.CheckoutOptions
                     {
-                        var commit = it.Repository.Lookup(infos[0], LibGit2Sharp.ObjectType.Commit) as LibGit2Sharp.Commit;
+                        CheckoutModifiers = LibGit2Sharp.CheckoutModifiers.Force
+                    };
+
+                    if (info.RemoteBranchName == null) // Checkout detached HEAD
+                    {
+                        var commit = it.Repository.Lookup(info.Sha, LibGit2Sharp.ObjectType.Commit) as LibGit2Sharp.Commit;
                         if (commit != null)
                         {
                             LibGit2Sharp.Commands.Checkout(it.Repository, commit, checkoutOptions);
@@ -520,17 +440,16 @@ namespace GitIntermediateSync
                             continue;
                         }
                     }
-                    else if (infos.Length == 2) // Checkout branch
+                    else // Checkout branch
                     {
                         // Get remote branch from name
                         // TODO: Handle branch with different local name
 
-                        string remoteBranchName = infos[1];
-                        string remoteBranchRef = remoteRefDestinationBase.Replace("*", remoteBranchName);
+                        string remoteBranchRef = remoteRefDestinationBase.Replace("*", info.RemoteBranchName);
                         var remoteBranch = it.Repository.Branches[remoteBranchRef];
                         if (remoteBranch == null)
                         {
-                            Console.Error.WriteLine("Could not find remote branch ({0})", remoteBranchName);
+                            Console.Error.WriteLine("Could not find remote branch ({0})", info.RemoteBranchName);
                             return false;
                         }
 
@@ -550,31 +469,37 @@ namespace GitIntermediateSync
 
                         if (localBranch == null)
                         {
-                            LibGit2Sharp.Branch newBranch = it.Repository.Branches.Add(remoteBranchName, remoteBranch.Tip, false);
+                            LibGit2Sharp.Branch newBranch = it.Repository.Branches.Add(info.RemoteBranchName, remoteBranch.Tip, false);
                             localBranch = it.Repository.Branches.Update(newBranch, b => b.TrackedBranch = remoteBranch.CanonicalName);
                         }
 
                         if (localBranch == null)
                         {
-                            Console.Error.WriteLine("Failed to get local branch for remote branch ({0})", remoteBranchName);
+                            Console.Error.WriteLine("Failed to get local branch for remote branch ({0})", info.RemoteBranchName);
                             return false;
                         }
 
                         // Checkout local branch
 
-                        localBranch = LibGit2Sharp.Commands.Checkout(it.Repository, localBranch, checkoutOptions);
+                        LibGit2Sharp.Commands.Checkout(it.Repository, localBranch, checkoutOptions);
                         if (!PullCurrentBranch(it, out string checkoutState))
                         {
+                            Console.Out.WriteLine("{0,-15} -> {1} [{2}]", it.Chain, localBranch.CanonicalName, checkoutState);
                             return false;
                         }
 
-                        if (localBranch.Tip.Sha != infos[0])
+                        if (it.Repository.Head.Tip.Sha != info.Sha)
                         {
-                            var commit = it.Repository.Lookup(infos[0], LibGit2Sharp.ObjectType.Commit) as LibGit2Sharp.Commit;
+                            var commit = it.Repository.Lookup(info.Sha, LibGit2Sharp.ObjectType.Commit) as LibGit2Sharp.Commit;
                             if (commit != null)
                             {
-                                LibGit2Sharp.Commands.Checkout(it.Repository, commit, checkoutOptions);
-                                checkoutState = "Detached";
+                                it.Repository.Reset(LibGit2Sharp.ResetMode.Hard, commit);
+                                checkoutState += " (Reset back)";
+                            }
+                            else
+                            {
+                                Console.Error.WriteLine("Failed to reset branch ({0}) to commit ({1})", info.RemoteBranchName, info.Sha);
+                                return false;
                             }
                         }
 
@@ -594,13 +519,17 @@ namespace GitIntermediateSync
         {
             LibGit2Sharp.FetchOptions fetchOptions = new LibGit2Sharp.FetchOptions();
 
-            LibGit2Sharp.MergeOptions mergeOptions = new LibGit2Sharp.MergeOptions();
-            mergeOptions.FailOnConflict = true;
-            mergeOptions.CommitOnSuccess = false;
+            LibGit2Sharp.MergeOptions mergeOptions = new LibGit2Sharp.MergeOptions
+            {
+                FailOnConflict = true,
+                CommitOnSuccess = false
+            };
 
-            LibGit2Sharp.PullOptions pullOptions = new LibGit2Sharp.PullOptions();
-            pullOptions.FetchOptions = fetchOptions;
-            pullOptions.MergeOptions = mergeOptions;
+            LibGit2Sharp.PullOptions pullOptions = new LibGit2Sharp.PullOptions
+            {
+                FetchOptions = fetchOptions,
+                MergeOptions = mergeOptions
+            };
 
             LibGit2Sharp.MergeResult result = LibGit2Sharp.Commands.Pull(repoIt.Repository, SIGNATURE, pullOptions);
 
@@ -609,7 +538,7 @@ namespace GitIntermediateSync
                 resultState = "Up to date";
                 return true;
             }
-            else if (result.Status == LibGit2Sharp.MergeStatus.FastForward)
+            else if (result.Status != LibGit2Sharp.MergeStatus.Conflicts)
             {
                 resultState = "Pulled";
                 return true;
@@ -621,26 +550,46 @@ namespace GitIntermediateSync
             }
         }
 
-        static bool ApplyPatch(in string repoPath, in string patchFile, in bool stage)
+        static bool ApplyPatch(in LibGit2Sharp.Repository rootRepository, in string patchContent, in bool stage)
         {
-            Console.Out.WriteLine("Applying patch " + patchFile);
+            Console.Out.Write("Applying {0} patch...\t", stage ? "staged" : "unstaged");
 
-            FileInfo patchFileInfo = new FileInfo(patchFile);
-            if (patchFileInfo.Length <= 1)
+            if (string.IsNullOrEmpty(patchContent))
             {
+                Console.Out.WriteLine(" [EMPTY]");
                 return true;
             }
 
-            if (GitHelper.Command(repoPath, "apply " + patchFile, out string outputApply) != 0)
+            string tmpPatchFilePath = Path.GetTempFileName();
+
+            using (var writer = File.CreateText(tmpPatchFilePath))
             {
+                writer.NewLine = Defines.PATCH_NEW_LINE;
+                writer.Write(patchContent);
+            }
+
+            int patchResult = GitHelper.Command(rootRepository.Info.WorkingDirectory, "apply " + tmpPatchFilePath, out string error, out string output);
+
+            File.Delete(tmpPatchFilePath);
+
+            if (patchResult != 0)
+            {
+                Console.Out.WriteLine(" [FAILED]");
                 Console.Error.WriteLine("Failed to apply patch:");
-                Console.Error.WriteLine(outputApply);
+                Console.Error.WriteLine(Helper.Indent(error));
                 return false;
+            }
+
+            Console.Out.WriteLine(" [DONE]");
+
+            if (!string.IsNullOrEmpty(output))
+            {
+                Console.Out.WriteLine(output);
             }
 
             if (stage)
             {
-                Stage(new LibGit2Sharp.Repository(repoPath), true);
+                Stage(rootRepository, true);
             }
 
             return true;
@@ -670,10 +619,10 @@ namespace GitIntermediateSync
         {
             foreach (var it in new RepositoryIterator(repository))
             {
-                if (GitHelper.Command(it.Repository.Info.WorkingDirectory, "add --all", out string output) != 0)
+                if (GitHelper.Command(it.Repository.Info.WorkingDirectory, "add --all", out string error) != 0)
                 {
                     Console.Error.WriteLine("Failed to stage patch ({0})", it.Chain);
-                    Console.Error.WriteLine(output);
+                    Console.Error.WriteLine(Helper.Indent(error));
                     return false;
                 }
 

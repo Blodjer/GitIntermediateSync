@@ -4,7 +4,7 @@ using System.IO;
 
 namespace GitIntermediateSync
 {
-    class Helper
+    abstract class Helper
     {
         public static string GetRelativePath(string fromPath, string toPath)
         {
@@ -88,6 +88,12 @@ namespace GitIntermediateSync
             string result = Console.In.ReadLine();
             return result == "y" || result == "Y";
 #endif
+        }
+
+        public static string Indent(in string text)
+        {
+            const string indent = "    ";
+            return string.Concat(indent, text.Replace("\n", "\n" + indent));
         }
     }
 }

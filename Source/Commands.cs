@@ -5,7 +5,7 @@ using System.Reflection;
 
 namespace GitIntermediateSync
 {
-    public class OperationInfo : Attribute
+    class OperationInfo : Attribute
     {
         public Operation operation = Operation.Unkown;
         public string command = string.Empty;
@@ -13,7 +13,7 @@ namespace GitIntermediateSync
         public string description = string.Empty;
     }
 
-    public enum Operation
+    enum Operation
     {
         Unkown,
 
@@ -23,7 +23,7 @@ namespace GitIntermediateSync
         Apply
     }
 
-    class OperationCommands
+    abstract class OperationCommands
     {
         private static readonly ReadOnlyDictionary<string, OperationInfo> m_commandToOperationMap;
         private static readonly ReadOnlyDictionary<Operation, OperationInfo> m_operationInfoMap;
