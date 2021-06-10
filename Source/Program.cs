@@ -278,11 +278,11 @@ namespace GitIntermediateSync
 
                 if (staged)
                 {
-                    patch.DiffStaged = output;
+                    patch.DiffStaged += output;
                 }
                 else
                 {
-                    patch.DiffUnstaged = output;
+                    patch.DiffUnstaged += output;
                 }
 
                 Console.Out.WriteLine("{0,-15} [Added]", it.Chain);
@@ -346,7 +346,7 @@ namespace GitIntermediateSync
 
                 if (it.Repository.Head.TrackingDetails.AheadBy != null && it.Repository.Head.TrackingDetails.AheadBy != 0)
                 {
-                    Console.Error.WriteLine("Cannot create patch if there are uncommited changes ({0})", it.Chain);
+                    Console.Error.WriteLine("Cannot create patch if there are uncommited changes in {0}", it.Chain);
                     return false;
                 }
 
@@ -546,7 +546,7 @@ namespace GitIntermediateSync
             else
             {
                 resultState = "Failed";
-                return false;
+                return true; // TODO: Hack to allow amend commits work
             }
         }
 
@@ -556,7 +556,7 @@ namespace GitIntermediateSync
 
             if (string.IsNullOrEmpty(patchContent))
             {
-                Console.Out.WriteLine(" [EMPTY]");
+                Console.Out.WriteLine(" [No changes]");
                 return true;
             }
 
@@ -574,13 +574,13 @@ namespace GitIntermediateSync
 
             if (patchResult != 0)
             {
-                Console.Out.WriteLine(" [FAILED]");
+                Console.Out.WriteLine(" [Failed]");
                 Console.Error.WriteLine("Failed to apply patch:");
                 Console.Error.WriteLine(Helper.Indent(error));
                 return false;
             }
 
-            Console.Out.WriteLine(" [DONE]");
+            Console.Out.WriteLine(" [Done]");
 
             if (!string.IsNullOrEmpty(output))
             {
