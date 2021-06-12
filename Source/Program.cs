@@ -20,7 +20,8 @@ namespace GitIntermediateSync
 
     abstract class Program
     {
-        static readonly string SYNC_SUB_PATH = Path.Combine("!sync", "Git");
+        static readonly string ONE_DRIVE_PATH = Environment.GetEnvironmentVariable("OneDriveConsumer");
+        static readonly string SYNC_SUB_PATH = Path.Combine("!sync", "git", "patch");
         const string GIT_INSTALLER_MASK = "Git-*.exe";
 
         static readonly LibGit2Sharp.Signature SIGNATURE = new LibGit2Sharp.Signature("GitIntermediateSync", "(no email)", DateTimeOffset.UtcNow); // TODO: Replace by getter
@@ -60,8 +61,7 @@ namespace GitIntermediateSync
 
             string syncPath;
             {
-                string oneDrive = Environment.GetEnvironmentVariable("OneDriveConsumer");
-                syncPath = Path.Combine(oneDrive, SYNC_SUB_PATH);
+                syncPath = Path.Combine(ONE_DRIVE_PATH, SYNC_SUB_PATH);
                 if (!Directory.Exists(syncPath))
                 {
                     Console.Error.WriteLine("Sync directory not found! ({0})", syncPath);

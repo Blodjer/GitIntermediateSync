@@ -9,7 +9,7 @@
     <ProjectGuid>{177C4B58-1141-4B20-BB14-74E98BC937B8}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <RootNamespace>GitIntermediateSync</RootNamespace>
-    <AssemblyName>GitIntermediateSync</AssemblyName>
+    <AssemblyName>gis</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -65,10 +65,10 @@
     <PlatformTarget>AnyCPU</PlatformTarget>
     <LangVersion>7.3</LangVersion>
     <ErrorReport>prompt</ErrorReport>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>
-    </ApplicationIcon>
+    <ApplicationIcon>git.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup>
     <ManifestCertificateThumbprint>86827924303A756813D0D7B8A8D995CC3119BD1F</ManifestCertificateThumbprint>
@@ -274,7 +274,7 @@
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
     <PostBuildEvent>if "$(ConfigurationName)" == "Release" (
-xcopy "$(TargetPath)" "$(OneDriveConsumer)\!sync\Git\" /y
+xcopy "$(TargetPath)" "$(OneDriveConsumer)\!sync\git\" /y
 )</PostBuildEvent>
   </PropertyGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
