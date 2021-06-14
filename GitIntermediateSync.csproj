@@ -251,6 +251,9 @@
   <ItemGroup>
     <None Include="App.config" />
     <None Include="packages.config" />
+    <AdditionalFiles Include="RegisterGisCommand.bat">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </AdditionalFiles>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -275,6 +278,7 @@
   <PropertyGroup>
     <PostBuildEvent>if "$(ConfigurationName)" == "Release" (
 xcopy "$(TargetPath)" "$(OneDriveConsumer)\!sync\git\" /y
+xcopy "$(TargetDir)RegisterGisCommand.bat" "$(OneDriveConsumer)\!sync\git\" /y
 )</PostBuildEvent>
   </PropertyGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">

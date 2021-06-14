@@ -1,0 +1,1 @@
+Powershell -Command "& { $p = [Environment]::GetEnvironmentVariable('PATH', [EnvironmentVariableTarget]::User); [Environment]::SetEnvironmentVariable('PATH', $p + ';%%OneDriveConsumer%%\!sync\git', [EnvironmentVariableTarget]::User); }"
