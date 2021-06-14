@@ -101,6 +101,21 @@ namespace GitIntermediateSync
                 return p.ExitCode;
             }
         }
+
+        public static bool IsRemoteSupported(in LibGit2Sharp.Remote remote)
+        {
+            if (string.IsNullOrEmpty(remote.Url))
+            {
+                return false;
+            }
+
+            if (!remote.Url.StartsWith("https://"))
+            {
+                return false;
+            }
+
+            return true;
+        }
     }
     
     // TODO: Iterator is not implemented correctly

@@ -171,10 +171,17 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool CheckRepositoryReady(in LibGit2Sharp.Repository rootRepository)
+        static bool IsRepositoryValidAndReady(in LibGit2Sharp.Repository rootRepository)
         {
             foreach (var it in new RepositoryIterator(rootRepository))
             {
+                var remote = GitHelper.GetRepositoryRemote(it.Repository);
+                if (!GitHelper.IsRemoteSupported(remote))
+                {
+                    Console.Error.WriteLine("Only https connections are supported for remotes ({0})", it.Repository.Info.WorkingDirectory);
+                    return false;
+                }
+
                 if (it.Repository.Info.CurrentOperation != LibGit2Sharp.CurrentOperation.None)
                 {
                     Console.Error.WriteLine("Repository is currently in operation ({0})", it.Chain);
@@ -189,7 +196,7 @@ namespace GitIntermediateSync
         {
             using (var repository = new LibGit2Sharp.Repository(rootRepositoryPath))
             {
-                if (!CheckRepositoryReady(repository))
+                if (!IsRepositoryValidAndReady(repository))
                 {
                     return false;
                 }
@@ -297,7 +304,7 @@ namespace GitIntermediateSync
         {
             using (var repository = new LibGit2Sharp.Repository(rootRepositoryPath))
             {
-                if (!CheckRepositoryReady(repository))
+                if (!IsRepositoryValidAndReady(repository))
                 {
                     return false;
                 }
@@ -370,7 +377,6 @@ namespace GitIntermediateSync
                     }
 
                     headInfo.RemoteBranchName = remoteBranchName.Remove(0, prefixToRemove.Length);
-                    //remoteUrl = repo.Network.Remotes[remoteBranch.RemoteName].Url;
                 }
                 else
                 {
