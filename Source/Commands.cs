@@ -9,18 +9,56 @@ namespace GitIntermediateSync
     {
         public Operation operation = Operation.Unkown;
         public string command = string.Empty;
-        public bool critical = true;
         public string description = string.Empty;
+        public bool showDestructiveWarning = true;
     }
 
     enum Operation
     {
         Unkown,
 
-        [OperationInfo(command = "save", critical = false, description = "Save and upload the current diff")]
+        [OperationInfo(command = "save", description = "Save and upload the current diff", showDestructiveWarning = false)]
         Save,
-        [OperationInfo(command = "apply", critical = true, description = "Apply the latest state to the local repository")]
+        [OperationInfo(command = "apply", description = "Apply the latest state to the local repository", showDestructiveWarning = false)]
         Apply
+    }
+
+    public enum OperationResult
+    {
+        Unknown,
+        Success,
+        Failure,
+        Abort
+    }
+
+    struct OperationReturn
+    {
+        public readonly OperationResult Result;
+
+        private OperationReturn(in OperationResult result)
+        {
+            this.Result = result;
+        }
+
+        public static implicit operator OperationReturn(in OperationResult result)
+        {
+            return new OperationReturn(result);
+        }
+
+        public static implicit operator OperationReturn(in bool success)
+        {
+            return success ? OperationResult.Success : OperationResult.Failure;
+        }
+
+        public static implicit operator OperationResult(OperationReturn operationReturn)
+        {
+            return operationReturn.Result;
+        }
+
+        public static implicit operator bool(OperationReturn operationReturn)
+        {
+            return operationReturn.Result == OperationResult.Success;
+        }
     }
 
     abstract class OperationCommands

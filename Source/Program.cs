@@ -93,37 +93,43 @@ namespace GitIntermediateSync
                 }
             }
 
-            if (operationInfo.critical)
+            // Run Operation
+
+            OperationReturn operationReturn = RunOperation(operationInfo, repositoryPath, syncPath);
+            switch (operationReturn.Result)
             {
-                if (!Helper.ShowConfirmationMessage(string.Format("<{0}> is a critical operation. Do you want to continue?", operationInfo.command)))
-                {
-                    Console.Error.WriteLine("OPERATION ABORTED");
+                case OperationResult.Success:
+                    Console.Out.WriteLine("\nOPERATION COMPLETED");
+                    return true;
+                case OperationResult.Failure:
+                    Console.Out.WriteLine("\nOPERATION FAILED");
                     return false;
+                case OperationResult.Abort:
+                    Console.Out.WriteLine("\nOPERATION ABORTED");
+                    return false;
+                default:
+                    Console.Out.WriteLine("\nUNKOWN OPERATION RESULT");
+                    return false;
+            }
+        }
+
+        static OperationReturn RunOperation(in OperationInfo operationInfo, in string repositoryPath, in string syncPath)
+        {
+            if (operationInfo.showDestructiveWarning)
+            {
+                if (!Helper.ShowWarningMessage(string.Format("<{0}> is a destructive operation. Do you want to continue?", operationInfo.command)))
+                {
+                    return OperationResult.Abort;
                 }
             }
 
-            bool operationSuccess = false;
             switch (operationInfo.operation)
             {
-                case Operation.Save:
-                    operationSuccess = Op_MakePatch(repositoryPath, syncPath);
-                    break;
-                case Operation.Apply:
-                    operationSuccess = Op_ApplyPatch(repositoryPath, syncPath);
-                    break;
+                case Operation.Save: return Op_MakePatch(repositoryPath, syncPath);
+                case Operation.Apply: return Op_ApplyPatch(repositoryPath, syncPath);
             }
 
-            if (operationSuccess)
-            {
-                Console.Out.WriteLine("OPERATION COMPLETED");
-                return false;
-            }
-            else
-            {
-                Console.Out.WriteLine();
-                Console.Out.WriteLine("OPERATION FAILED");
-                return false;
-            }
+            return OperationResult.Unknown;
         }
 
         static bool CheckPrerequisites()
@@ -192,7 +198,7 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool Op_MakePatch(in string rootRepositoryPath, in string syncPath)
+        static OperationReturn Op_MakePatch(in string rootRepositoryPath, in string syncPath)
         {
             using (var repository = new LibGit2Sharp.Repository(rootRepositoryPath))
             {
@@ -300,7 +306,7 @@ namespace GitIntermediateSync
             return true;
         }
 
-        static bool Op_ApplyPatch(in string rootRepositoryPath, in string syncPath)
+        static OperationReturn Op_ApplyPatch(in string rootRepositoryPath, in string syncPath)
         {
             using (var repository = new LibGit2Sharp.Repository(rootRepositoryPath))
             {
@@ -309,16 +315,31 @@ namespace GitIntermediateSync
                     return false;
                 }
 
-                Patch patch = Patch.FromPath(repository, syncPath, out DateTime timestamp);
-                if (patch == null)
-                {
-                    Console.Error.WriteLine("Could not find patch in {0}", syncPath);
-                    return false;
-                }
+                // Find patch
 
-                TimeSpan patchAge = DateTime.Now - timestamp.ToLocalTime();
-                Console.Out.WriteLine("Latest patch is from {0} ago ({1})", Helper.ToReadableString(patchAge), timestamp.ToLocalTime().ToString());
-                Console.Out.WriteLine();
+                Patch patch;
+                do
+                {
+                    patch = Patch.FromPath(repository, syncPath, out DateTime timestamp);
+                    if (patch == null)
+                    {
+                        Console.Error.WriteLine("Could not find patch in {0}", syncPath);
+                        return false;
+                    }
+
+                    TimeSpan patchAge = DateTime.Now - timestamp.ToLocalTime();
+                    string message = string.Format("Latest patch is from {0} ago ({1})\nDo you want to apply this patch?", Helper.ToReadableString(patchAge), timestamp.ToLocalTime().ToString());
+
+                    if (Helper.ShowConfirmationRequest(message))
+                    {
+                        Console.Out.WriteLine();
+                        break;
+                    }
+                    else
+                    {
+                        return OperationResult.Abort;
+                    }
+                } while (true);
 
                 // Apply latest patch
 
@@ -339,7 +360,6 @@ namespace GitIntermediateSync
                 {
                     return false;
                 }
-                Console.Out.WriteLine();
 
                 return true;
             }

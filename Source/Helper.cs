@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
 
 namespace GitIntermediateSync
@@ -64,9 +63,9 @@ namespace GitIntermediateSync
             {
                 formatted += string.Format("{0:0} minute{1}, ", span.Minutes, span.Minutes == 1 ? string.Empty : "s");
             }
-            if (span.Duration().Seconds > 0 && span.Duration().TotalMinutes < 3)
+            if (span.Duration().Seconds > 0 && span.Duration().TotalMinutes < 2)
             {
-                formatted += string.Format("{0:0} second{1}", span.Seconds, span.Seconds == 1 ? string.Empty : "s");
+                formatted += string.Format("{0:0} second{1}, ", span.Seconds, span.Seconds == 1 ? string.Empty : "s");
             }
 
             if (formatted.EndsWith(", ")) formatted = formatted.Substring(0, formatted.Length - 2);
@@ -76,18 +75,38 @@ namespace GitIntermediateSync
             return formatted;
         }
 
-        public static bool ShowConfirmationMessage(string message)
+        public static bool ShowWarningMessage(string message)
         {
-#if true
             System.Windows.Forms.DialogResult result = System.Windows.Forms.MessageBox.Show(message, "Warning", System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Warning);
             return result == System.Windows.Forms.DialogResult.Yes;
-#else
-            // Console.Out.WriteLine(Console.IsInputRedirected);
-            Console.Out.WriteLine(message);
-            Console.Out.Write("Confirm with (y)es or (n)o: ");
-            string result = Console.In.ReadLine();
-            return result == "y" || result == "Y";
-#endif
+        }
+
+        public static bool ShowConfirmationRequest(string message)
+        {
+            if (Console.IsInputRedirected)
+            {
+                Console.Out.WriteLine(message);
+                System.Windows.Forms.DialogResult result = System.Windows.Forms.MessageBox.Show(message, "Confirmation required", System.Windows.Forms.MessageBoxButtons.OKCancel, System.Windows.Forms.MessageBoxIcon.Question);
+                return result == System.Windows.Forms.DialogResult.OK;
+            }
+            else
+            {
+                Console.Out.Write(message);
+                Console.Out.WriteLine(" (Press \"Enter\" to continue; \"c\" to cancel)");
+
+                do
+                {
+                    var consoleKey = Console.ReadKey(true).Key;
+                    if (consoleKey == ConsoleKey.Enter)
+                    {
+                        return true;
+                    }
+                    else if (consoleKey == ConsoleKey.C)
+                    {
+                        return false;
+                    }
+                } while (true);
+            }
         }
 
         public static string Indent(in string text)
