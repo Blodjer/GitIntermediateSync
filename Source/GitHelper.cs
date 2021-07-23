@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 
 namespace GitIntermediateSync
 {
@@ -72,13 +73,29 @@ namespace GitIntermediateSync
             repositoryIdentifier = origin;
             return true;
         }
-
-        public static int Command(in string workingDir, in string command, out string error)
+        
+        public static int CommandRead(in string workingDir, in string command, out string error)
         {
-            return Command(workingDir, command, out error, out _);
+            return CommandRead(workingDir, command, out error, out _);
         }
 
-        public static int Command(in string workingDir, in string command, out string error, out string output)
+        public static int CommandWrite(in string workingDir, in string command, out string error)
+        {
+            return CommandWrite(workingDir, command, out error, out _);
+        }
+
+        public static int CommandRead(in string workingDir, in string command, out string error, out string output)
+        {
+            return Command_Internal(false, workingDir, command, out error, out output);
+        }
+
+        public static int CommandWrite(in string workingDir, in string command, out string error, out string output)
+        {
+            return Command_Internal(true, workingDir, command, out error, out output);
+        }
+
+        static readonly ReaderWriterLockSlim commandLock = new ReaderWriterLockSlim();
+        private static int Command_Internal(in bool write, in string workingDir, in string command, out string error, out string output)
         {
             ProcessStartInfo startInfo = new ProcessStartInfo
             {
@@ -93,11 +110,30 @@ namespace GitIntermediateSync
                 WindowStyle = ProcessWindowStyle.Minimized
             };
 
+            if (write)
+            {
+                commandLock.EnterWriteLock();
+            }
+            else
+            {
+                commandLock.EnterReadLock();
+            }
+
             using (Process p = Process.Start(startInfo))
             {
                 output = p.StandardOutput.ReadToEnd();
                 error = p.StandardError.ReadToEnd();
                 p.WaitForExit();
+
+                if (write)
+                {
+                    commandLock.ExitWriteLock();
+                }
+                else
+                {
+                    commandLock.ExitReadLock();
+                }
+
                 return p.ExitCode;
             }
         }

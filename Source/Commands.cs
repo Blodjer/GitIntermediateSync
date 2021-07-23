@@ -20,7 +20,9 @@ namespace GitIntermediateSync
         [OperationInfo(command = "save", description = "Save and upload the current diff", showDestructiveWarning = false)]
         Save,
         [OperationInfo(command = "apply", description = "Apply the latest state to the local repository", showDestructiveWarning = false)]
-        Apply
+        Apply,
+        [OperationInfo(command = "compare", description = "Diff the difference between the working directory and the latest available patch", showDestructiveWarning = false)]
+        Compare
     }
 
     public enum OperationResult
