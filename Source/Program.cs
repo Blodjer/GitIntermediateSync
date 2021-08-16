@@ -219,7 +219,8 @@ namespace GitIntermediateSync
 
                 if (patch.Serialize(root, syncPath, out string file))
                 {
-                    Console.Out.WriteLine("Created patch {0}", file);
+                    string fileSize = Helper.ToReadableString_ByteSize(new FileInfo(file).Length);
+                    Console.Out.WriteLine("Created patch {0} ({1})", file, fileSize);
                     return true;
                 }
                 else
@@ -651,7 +652,8 @@ namespace GitIntermediateSync
                 writer.Write(diff);
             }
 
-            int patchResult = GitHelper.CommandWrite(root.Info.WorkingDirectory, "apply " + tmpDiffFilePath, out string error, out string output);
+            string command = string.Format("apply {0} --whitespace=nowarn", tmpDiffFilePath);
+            int patchResult = GitHelper.CommandWrite(root.Info.WorkingDirectory, command, out string error, out string output);
 
             File.Delete(tmpDiffFilePath);
 

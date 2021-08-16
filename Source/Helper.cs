@@ -75,6 +75,19 @@ namespace GitIntermediateSync
             return formatted;
         }
 
+        public static string ToReadableString_ByteSize(in long size)
+        {
+            double s = size;
+
+            if (s < 1000.0) { return string.Format("{0:0} bytes", s); }
+            s /= 1000.0;
+            if (s < 1000.0) { return string.Format("{0:0} kB", s); }
+            s /= 1000.0;
+            if (s < 1000.0) { return string.Format("{0:0} MB", s); }
+            s /= 1000.0;
+                              return string.Format("{0:0} GB", s);
+        }
+
         public static bool ShowWarningMessage(string message)
         {
             System.Windows.Forms.DialogResult result = System.Windows.Forms.MessageBox.Show(message, "Warning", System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Warning);
