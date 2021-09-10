@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 // TODO
 // - Simplify code
 // - Cleanup Backups and Patches
-// - Replace staged/unstaged with index/working/?
+// - Support custom sync path
 
 namespace GitIntermediateSync
 {
@@ -91,6 +91,15 @@ namespace GitIntermediateSync
                 {
                     Console.Error.WriteLine("Repository not valid!");
                     return false;
+                }
+
+                TextWriterExtension.DefaultAlignmentWidth = 0;
+                foreach (var it in new RepositoryIterator(repositoryPath))
+                {
+                    if (it.Chain.Length > TextWriterExtension.DefaultAlignmentWidth)
+                    {
+                        TextWriterExtension.DefaultAlignmentWidth = it.Chain.Length;
+                    }
                 }
             }
 
@@ -466,7 +475,7 @@ namespace GitIntermediateSync
                         if (commit != null)
                         {
                             LibGit2Sharp.Commands.Checkout(it.Repository, commit, checkoutOptions);
-                            Console.Out.WriteLine("{0,-15} -> {1}", it.Chain, commit.Sha);
+                            Console.Out.WriteLineAligned(it.Chain, "-> {0}", commit.Sha);
                             continue;
                         }
                     }
@@ -514,7 +523,7 @@ namespace GitIntermediateSync
                         LibGit2Sharp.Commands.Checkout(it.Repository, localBranch, checkoutOptions);
                         if (!PullCurrentBranch(it, out string checkoutState))
                         {
-                            Console.Out.WriteLine("{0,-15} -> {1} [{2}]", it.Chain, localBranch.CanonicalName, checkoutState);
+                            Console.Out.WriteLineAligned(it.Chain, "-> {0} [{1}]", localBranch.CanonicalName, checkoutState);
                             return false;
                         }
 
@@ -533,7 +542,7 @@ namespace GitIntermediateSync
                             }
                         }
 
-                        Console.Out.WriteLine("{0,-15} -> {1} [{2}]", it.Chain, localBranch.CanonicalName, checkoutState);
+                        Console.Out.WriteLineAligned(it.Chain, "-> {0} [{1}]", localBranch.CanonicalName, checkoutState);
                         continue;
                     }
 
@@ -605,14 +614,14 @@ namespace GitIntermediateSync
                 {
                     if (!result.Success)
                     {
-                        Console.Out.WriteLine("{0,-15} [Failed]", result.RepositoryChain);
+                        Console.Out.WriteLineAligned(result.RepositoryChain, "[Failed]");
                         Console.Error.WriteLine(Helper.Indent(result.Error));
                         return false;
                     }
 
                     if (string.IsNullOrWhiteSpace(result.Diff))
                     {
-                        Console.Out.WriteLine("{0,-15} [No changes detected]", result.RepositoryChain);
+                        Console.Out.WriteLineAligned(result.RepositoryChain, "[No changes detected]");
                         continue;
                     }
 
@@ -625,7 +634,7 @@ namespace GitIntermediateSync
                         patch.DiffUnstaged += result.Diff;
                     }
 
-                    Console.Out.WriteLine("{0,-15} [Added]", result.RepositoryChain);
+                    Console.Out.WriteLineAligned(result.RepositoryChain, "[Added]");
                 }
 
                 Console.Out.WriteLine();
@@ -636,11 +645,11 @@ namespace GitIntermediateSync
 
         static bool ApplyDiff_R(in LibGit2Sharp.Repository root, in string diff, in bool stage)
         {
-            Console.Out.Write("Applying {0} patch...\t", stage ? "staged" : "unstaged");
+            Console.Out.Write(string.Format("Applying {0} patch... ", stage ? "staged" : "unstaged").PadRight(30));
 
             if (string.IsNullOrEmpty(diff))
             {
-                Console.Out.WriteLine(" [No changes]");
+                Console.Out.WriteLine("[No changes]");
                 return true;
             }
 
@@ -659,12 +668,12 @@ namespace GitIntermediateSync
 
             if (patchResult != 0)
             {
-                Console.Out.WriteLine(" [Failed]");
+                Console.Out.WriteLine("[Failed]");
                 Console.Error.WriteLine("Failed to apply patch:\n{0}", Helper.Indent(error));
                 return false;
             }
 
-            Console.Out.WriteLine(" [Done]");
+            Console.Out.WriteLine("[Done]");
 
             if (!string.IsNullOrEmpty(output))
             {
@@ -772,7 +781,7 @@ namespace GitIntermediateSync
                 var stash = it.Repository.Stashes.Add(SIGNATURE, "Backup", LibGit2Sharp.StashModifiers.IncludeUntracked);
                 // TODO: Handle stashing exception error (if there are any)
 
-                Console.Out.WriteLine("{0,-15} [{1}]", it.Chain, stash != null ? "Stashed" : "Skipped");
+                Console.Out.WriteLineAligned(it.Chain, "[{0}]", stash != null ? "Stashed" : "Skipped");
             }
 
             return true;

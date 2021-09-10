@@ -128,4 +128,19 @@ namespace GitIntermediateSync
             return string.Concat(indent, text.Replace("\n", "\n" + indent));
         }
     }
+
+    public static class TextWriterExtension
+    {
+        public static int DefaultAlignmentWidth = 0;
+
+        public static void WriteLineAligned(this TextWriter writer, in string key, in string format, params object[] args)
+        {
+            writer.WriteLine(string.Concat(key.PadRight(DefaultAlignmentWidth), "     ", format), args);
+        }
+
+        public static void WriteLineAligned(this TextWriter writer, in int padWidth, in string key, in string format, params object[] args)
+        {
+            writer.WriteLine(string.Concat(key.PadRight(padWidth), "     ", format), args);
+        }
+    }
 }
